@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from .fileio import read_text, write_text
+
 SourceFormat = Literal["mcp", "openai", "anthropic"]
 
 
@@ -73,8 +75,8 @@ class ToolSet(BaseModel):
         return len(self.tools)
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(self.model_dump_json(indent=2))
+        write_text(path, self.model_dump_json(indent=2))
 
     @classmethod
     def load(cls, path: str | Path) -> ToolSet:
-        return cls.model_validate_json(Path(path).read_text())
+        return cls.model_validate_json(read_text(path, legacy=True))

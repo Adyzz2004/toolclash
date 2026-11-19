@@ -20,11 +20,14 @@ from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from rich import box
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .bench import BenchRun
+from .fileio import read_text, write_text
 
 NONE = "(none)"
 
@@ -37,6 +40,7 @@ class ToolStats(BaseModel):
     accuracy: float
     stability: float
     flip_rate: float
+    excluded: int = 0  # samples for this tool with no usable answer (not in the numbers above)
 
 
 class PairStats(BaseModel):
@@ -59,13 +63,16 @@ class Summary(BaseModel):
     overall_accuracy: float
     over_trigger_rate: float | None  # None when there were no no-tool questions
     usage: dict[str, int]
+    # Samples with no usable answer (reason -> count), left out of every number above.
+    excluded: dict[str, int] = Field(default_factory=dict)
+    tracks_errors: bool = False  # see BenchRun.tracks_errors
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(self.model_dump_json(indent=2))
+        write_text(path, self.model_dump_json(indent=2))
 
     @classmethod
     def load(cls, path: str | Path) -> Summary:
-        return cls.model_validate_json(Path(path).read_text())
+        return cls.model_validate_json(read_text(path, legacy=True))
 
 
 def _label(name: str | None) -> str:
@@ -82,13 +89,20 @@ def summarize(run: BenchRun) -> Summary:
     matrix: dict[str, dict[str, int]] = {e: {p: 0 for p in labels} for e in labels}
     by_question: dict[str, list[str]] = defaultdict(list)
     expected_of: dict[str, str] = {}
+    excluded: Counter[str] = Counter()
+    excluded_for: Counter[str] = Counter()
     for pick in run.picks:
+        if pick.error:  # truncated / refused: no decision was made, so it is not a pick at all
+            excluded[pick.error] += 1
+            excluded_for[_label(pick.expected)] += 1
+            continue
         exp, got = _label(pick.expected), _label(pick.picked)
-        if got not in matrix[exp]:  # a name we never heard of (model hallucinated a tool)
-            for row in matrix.values():
-                row.setdefault(got, 0)
-            if got not in labels:
-                labels.append(got)
+        for name in (exp, got):
+            if name not in matrix:  # a name outside the tool list, e.g. a hallucinated tool
+                labels.append(name)
+                for row in matrix.values():
+                    row[name] = 0
+                matrix[name] = {p: 0 for p in labels}
         matrix[exp][got] += 1
         by_question[pick.question_id].append(got)
         expected_of[pick.question_id] = exp
@@ -112,6 +126,7 @@ def summarize(run: BenchRun) -> Summary:
             accuracy=correct / n_samples if n_samples else 0.0,
             stability=sum(majority_shares) / len(majority_shares) if majority_shares else 0.0,
             flip_rate=flips / len(qids) if qids else 0.0,
+            excluded=excluded_for[name],
         )
 
     pairs = []
@@ -143,6 +158,8 @@ def summarize(run: BenchRun) -> Summary:
         overall_accuracy=tool_correct / tool_samples if tool_samples else 0.0,
         over_trigger_rate=over_trigger,
         usage=run.usage,
+        excluded=dict(excluded),
+        tracks_errors=run.tracks_errors,
     )
 
 
@@ -161,48 +178,77 @@ def print_summary(
     console: Console | None = None,
     max_pairs: int = 10,
     prices: tuple[float, float] | None = None,
+    *,
+    ascii_only: bool = False,
 ) -> None:
+    """Print the report. ``ascii_only`` draws tables, arrows and dots in plain ASCII.
+
+    The CLI asks for that when output goes to a file or pipe: Windows PowerShell 5.1
+    decodes redirected output with an old code page that garbles box-drawing characters.
+    """
     console = console or Console()
     pct = _pct
+    arrow, dot = ("->", ".") if ascii_only else ("→", "·")
+    table_box = box.ASCII if ascii_only else box.HEAVY_HEAD
+
+    def show(table: Table) -> None:
+        if ascii_only:  # rich would shorten long names with a "…"; wrap them instead
+            for column in table.columns:
+                column.overflow = "fold"
+        console.print(table)
 
     cost = ""
     if prices:
         cost = f"  est. cost ${estimate_cost(s.usage, *prices):.4f}"
     console.print(
-        f"[bold]{s.provider}[/bold]  split={s.split}  samples/question={s.samples_per_question}  "
+        f"[bold]{escape(s.provider)}[/bold]  split={s.split}  samples/question={s.samples_per_question}  "
         f"calls={s.usage.get('calls', 0)}  tokens={s.usage.get('input_tokens', 0)}in/"
         f"{s.usage.get('output_tokens', 0)}out{cost}"
     )
+    if s.excluded:
+        detail = ", ".join(f"{reason} {n}" for reason, n in sorted(s.excluded.items()))
+        console.print(
+            f"[yellow]{sum(s.excluded.values())} samples had no usable answer ({detail}); "
+            "they are left out of every number below[/yellow]"
+        )
+    has_tool_data = any(st.samples for st in s.tools.values())
+    overall = pct(s.overall_accuracy) if has_tool_data else "n/a"
     over = "n/a" if s.over_trigger_rate is None else pct(s.over_trigger_rate)
-    console.print(f"overall accuracy {pct(s.overall_accuracy)}   over-trigger rate {over}\n")
+    console.print(f"overall accuracy {overall}   over-trigger rate {over}\n")
 
-    m = Table(title="Confusion matrix (rows: expected, columns: picked)")
+    m = Table(title="Confusion matrix (rows: expected, columns: picked)", box=table_box)
     m.add_column("expected \\ picked", style="bold")
     for col in s.labels:
-        m.add_column(col, justify="right")
+        m.add_column(escape(col), justify="right")
     for row in s.labels:
         cells = []
         for col in s.labels:
-            n = s.matrix[row].get(col, 0)
+            n = s.matrix.get(row, {}).get(col, 0)
             if n == 0:
-                cells.append("[dim]·[/dim]")
+                cells.append(f"[dim]{dot}[/dim]")
             elif row == col:
                 cells.append(f"[green]{n}[/green]")
             else:
                 cells.append(f"[red]{n}[/red]")
-        m.add_row(row, *cells)
-    console.print(m)
+        m.add_row(escape(row), *cells)
+    show(m)
 
-    t = Table(title="Per tool")
+    t = Table(title="Per tool", box=table_box)
     for col in ("tool", "questions", "accuracy", "stability", "flip rate"):
         t.add_column(col, justify="right" if col != "tool" else "left")
     for st in s.tools.values():
-        t.add_row(st.tool, str(st.questions), pct(st.accuracy), pct(st.stability), pct(st.flip_rate))
-    console.print(t)
+        if st.samples:
+            t.add_row(
+                escape(st.tool), str(st.questions), pct(st.accuracy), pct(st.stability),
+                pct(st.flip_rate),
+            )
+        else:  # no data is not the same as 0% accurate
+            t.add_row(escape(st.tool), str(st.questions), "n/a", "n/a", "n/a")
+    show(t)
 
-    p = Table(title=f"Most confused pairs (top {max_pairs})")
-    for col in ("A", "B", "A→B", "B→A", "mutual confusion"):
+    p = Table(title=f"Most confused pairs (top {max_pairs})", box=table_box)
+    for col in ("A", "B", f"A{arrow}B", f"B{arrow}A", "mutual confusion"):
         p.add_column(col, justify="right" if col not in ("A", "B") else "left")
     for ps in s.pairs[:max_pairs]:
-        p.add_row(ps.a, ps.b, str(ps.a_to_b), str(ps.b_to_a), pct(ps.mutual_confusion))
-    console.print(p)
+        p.add_row(escape(ps.a), escape(ps.b), str(ps.a_to_b), str(ps.b_to_a), pct(ps.mutual_confusion))
+    show(p)

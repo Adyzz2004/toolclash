@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .fileio import EncodingError, read_text
 from .models import SourceFormat, Tool, ToolSet
 
 
@@ -28,7 +29,9 @@ class LoadError(ValueError):
 def load_tools(path: str | Path, fmt: SourceFormat | None = None) -> ToolSet:
     """Read a JSON file and parse it. ``fmt`` overrides auto-detection."""
     try:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(read_text(path))
+    except EncodingError as e:
+        raise LoadError(str(e)) from e
     except json.JSONDecodeError as e:
         raise LoadError(f"{path} is not valid JSON: {e}") from e
     return parse_tools(data, fmt)
@@ -45,12 +48,19 @@ def parse_tools(data: Any, fmt: SourceFormat | None = None) -> ToolSet:
 def detect_format(data: Any) -> SourceFormat:
     """Guess which provider's shape ``data`` is in, from its top-level keys."""
     if isinstance(data, dict):
-        if "tools" in data:
-            return "mcp"
-        result = data.get("result")
-        if isinstance(result, dict) and "tools" in result:
-            return "mcp"
-        raise LoadError("JSON object has no 'tools' key; expected MCP tools/list output")
+        items = _wrapped_list(data)
+        if items is None:
+            raise LoadError("JSON object has no 'tools' key; expected MCP tools/list output")
+        # {"tools": [...]} is how MCP servers answer tools/list, but OpenAI and Anthropic
+        # lists get wrapped the same way. Reading those as MCP would silently drop every
+        # schema, so look at the items when they carry another format's schema key.
+        first = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else {}
+        if "inputSchema" not in first:
+            if "input_schema" in first:
+                return "anthropic"
+            if "function" in first or "parameters" in first:
+                return "openai"
+        return "mcp"
 
     if isinstance(data, list):
         if not data:
@@ -73,26 +83,23 @@ def detect_format(data: Any) -> SourceFormat:
 
 
 def _from_mcp(data: Any) -> ToolSet:
-    if isinstance(data, dict):
-        raw = data.get("tools")
-        if raw is None:
-            raw = data.get("result", {}).get("tools")
-    else:
-        raw = data
+    raw = _wrapped_list(data) if isinstance(data, dict) else data
     _check_list(raw, "mcp")
     return ToolSet(tools=[_tool(item, "inputSchema") for item in raw], source_format="mcp")
 
 
 def _from_openai(data: Any) -> ToolSet:
-    _check_list(data, "openai")
+    raw = _wrapped_list(data) if isinstance(data, dict) else data
+    _check_list(raw, "openai")
     # Nested shape keeps the real definition under "function"; flat shape is the item itself.
-    tools = [_tool(item.get("function", item), "parameters") for item in data]
+    tools = [_tool(item.get("function", item), "parameters") for item in raw]
     return ToolSet(tools=tools, source_format="openai")
 
 
 def _from_anthropic(data: Any) -> ToolSet:
-    _check_list(data, "anthropic")
-    return ToolSet(tools=[_tool(item, "input_schema") for item in data], source_format="anthropic")
+    raw = _wrapped_list(data) if isinstance(data, dict) else data
+    _check_list(raw, "anthropic")
+    return ToolSet(tools=[_tool(item, "input_schema") for item in raw], source_format="anthropic")
 
 
 _PARSERS: dict[str, Callable[[Any], ToolSet]] = {
@@ -103,6 +110,16 @@ _PARSERS: dict[str, Callable[[Any], ToolSet]] = {
 
 
 # --- helpers --------------------------------------------------------------------
+
+
+def _wrapped_list(data: dict[str, Any]) -> Any:
+    """The tool list inside ``{"tools": [...]}`` or JSON-RPC ``{"result": {"tools": [...]}}``."""
+    if "tools" in data:
+        return data["tools"]
+    result = data.get("result")
+    if isinstance(result, dict) and "tools" in result:
+        return result["tools"]
+    return None
 
 
 def _check_list(raw: Any, fmt: str) -> None:

@@ -28,6 +28,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from .fileio import read_text, write_text
 from .models import Tool, ToolSet
 from .providers import Provider, _tool_words
 
@@ -55,11 +56,11 @@ class QuestionSet(BaseModel):
         return [q for q in self.questions if q.split == split]
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(self.model_dump_json(indent=2))
+        write_text(path, self.model_dump_json(indent=2))
 
     @classmethod
     def load(cls, path: str | Path) -> QuestionSet:
-        return cls.model_validate_json(Path(path).read_text())
+        return cls.model_validate_json(read_text(path, legacy=True))
 
 
 class GenerationError(RuntimeError):
@@ -81,11 +82,11 @@ def generate_questions(
 ) -> QuestionSet:
     questions: list[Question] = []
 
-    for tool in tools.tools:
+    for tool in tools.tools if per_tool > 0 else []:
         for i, text in enumerate(_ask(provider, _direct_prompt(tool, per_tool), per_tool)):
             questions.append(_make(f"{tool.name}-direct-{i}", text, tool.name, "direct", None, heldout_fraction))
 
-    for a, b in similar_pairs(tools, pairs):
+    for a, b in similar_pairs(tools, pairs) if per_pair > 0 else []:
         for target, other in ((a, b), (b, a)):
             prompt = _ambiguous_prompt(target, other, per_pair)
             for i, text in enumerate(_ask(provider, prompt, per_pair)):

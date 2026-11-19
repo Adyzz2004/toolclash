@@ -62,7 +62,13 @@ the report has something to show).
 | **stability** | average agreement with the majority pick per question; 100% = every repeat gave the same answer |
 | **flip rate** | share of a tool's questions where the repeats disagreed — "correct but shaky" |
 | **mutual confusion (A, B)** | (A→B + B→A) / all picks for A and B — the pairs whose descriptions need work |
-| **over-trigger rate** | share of no-tool questions where the model called a tool anyway |
+| **over-trigger rate** | share of no-tool samples (every repeat counts) where the model called a tool anyway |
+
+A sample where the model gave no usable answer, because its reply was cut off at the
+token limit or it refused, is not counted as "called no tool": `run` warns about it and
+`report` leaves it out of every number and says how many there were. If a run stops part
+way (API error, Ctrl-C), the picks made so far are kept in `run.partial.json` next to the
+output file. Files are always read and written as UTF-8, on every platform.
 
 ## Anti-cheating rules built in
 

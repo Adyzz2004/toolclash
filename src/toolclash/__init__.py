@@ -1,19 +1,21 @@
 """toolclash: measure which of your agent's tools the model confuses with each other."""
 
-from .bench import BenchRun, run_bench
+from .bench import BenchAborted, BenchRun, run_bench
 from .gate import GateResult, compare
 from .loaders import LoadError, load_tools, parse_tools
 from .models import Tool, ToolSet
-from .providers import FakeProvider, Provider, get_provider
+from .providers import FakeProvider, Provider, ProviderError, get_provider
 from .questions import QuestionSet, generate_questions
 from .report import Summary, summarize
 
 __all__ = [
+    "BenchAborted",
     "BenchRun",
     "FakeProvider",
     "GateResult",
     "LoadError",
     "Provider",
+    "ProviderError",
     "QuestionSet",
     "Summary",
     "Tool",
