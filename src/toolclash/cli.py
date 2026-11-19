@@ -48,7 +48,8 @@ ProviderOpt = Annotated[
 
 
 def _fail(message: str) -> NoReturn:
-    err.print(f"[red]error:[/red] {escape(message)}")
+    # soft_wrap: no hard line breaks, so a file path in the message stays copyable
+    err.print(f"[red]error:[/red] {escape(message)}", soft_wrap=True)
     raise typer.Exit(code=1)
 
 
@@ -229,7 +230,8 @@ def run(
             )
     except KeyboardInterrupt as e:
         partial = getattr(e, "partial", None)
-        err.print(f"[red]interrupted[/red]{escape(_save_partial(partial, out)) if partial else ''}")
+        note = escape(_save_partial(partial, out)) if partial else ""
+        err.print(f"[red]interrupted[/red]{note}", soft_wrap=True)
         raise typer.Exit(code=130) from None
     except BenchAborted as e:
         if not isinstance(e.cause, ProviderError):  # a bug, not an API problem: keep the details

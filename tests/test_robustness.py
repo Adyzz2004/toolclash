@@ -599,7 +599,8 @@ def test_cli_falls_back_to_the_temp_folder_when_the_output_folder_fails(tmp_path
     temp.mkdir()
     monkeypatch.setattr(tempfile, "tempdir", str(temp))
     result = runner.invoke(app, ["run", TOOLS, str(q), "-o", str(out), "-n", "1", "--split", "all"])
-    assert result.exit_code == 1 and "toolclash.run.unsaved.json" in _flat(result.output)
+    # paths may be folded across lines, so compare without any whitespace
+    assert result.exit_code == 1 and "toolclash.run.unsaved.json" in "".join(_flat(result.output).split())
     assert BenchRun.load(temp / "toolclash.run.unsaved.json").picks
 
 
