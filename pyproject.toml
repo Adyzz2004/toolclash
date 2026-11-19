@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "toolclash"
+version = "0.1.0"
+description = "Measure which of your agent's tools the model confuses with each other."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2",
+    "typer>=0.12",
+    "rich>=13",
+]
+
+[project.optional-dependencies]
+openai = ["openai>=1.40"]
+anthropic = ["anthropic>=0.40"]
+all = ["openai>=1.40", "anthropic>=0.40"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+toolclash = "toolclash.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/toolclash"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

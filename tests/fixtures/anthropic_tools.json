@@ -1,0 +1,86 @@
+[
+  {
+    "name": "search_docs",
+    "description": "Search the internal documentation and return matching pages.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Free-text search query."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "Maximum number of results.",
+          "default": 5
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "get_doc",
+    "description": "Fetch the full content of one documentation page by its id.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "doc_id": {
+          "type": "string",
+          "description": "The page id, e.g. 'DOC-1234'."
+        }
+      },
+      "required": [
+        "doc_id"
+      ]
+    }
+  },
+  {
+    "name": "send_slack_message",
+    "description": "Post a message to a Slack channel.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "type": "string",
+          "description": "Channel name, e.g. '#eng'."
+        },
+        "text": {
+          "type": "string",
+          "description": "Message body."
+        }
+      },
+      "required": [
+        "channel",
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "create_ticket",
+    "description": "Create a new issue in the ticket tracker.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
+      },
+      "required": [
+        "title"
+      ]
+    }
+  }
+]
