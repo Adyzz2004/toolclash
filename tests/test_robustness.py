@@ -637,9 +637,15 @@ def test_windows_console_device_and_bad_json_name(tmp_path):
 
 
 def test_legacy_encoding_without_locale_getencoding(monkeypatch):
-    monkeypatch.delattr(fileio.locale, "getencoding", raising=False)  # as on Python 3.10
+    # As on Python 3.10, where locale has no getencoding(). Swap in a stand-in module rather
+    # than deleting the function: on 3.11+ locale's own getpreferredencoding() calls it.
+    stand_in = SimpleNamespace(getpreferredencoding=lambda do_setlocale=True: "cp1252")
+    monkeypatch.setattr(fileio, "locale", stand_in)
     encoding = fileio._legacy_encoding()
-    assert encoding.startswith("cp") if sys.platform == "win32" else encoding
+    if sys.platform == "win32":
+        assert encoding.startswith("cp")  # asked from Windows itself
+    else:
+        assert encoding == "cp1252"
 
 
 def test_gate_with_an_old_baseline_still_catches_a_tool_with_no_usable_answers():
@@ -724,7 +730,7 @@ def test_write_falls_back_to_overwriting_when_windows_will_not_replace(tmp_path,
         raise PermissionError("[WinError 5] Access is denied")
 
     monkeypatch.setattr(fileio.os, "replace", refuse)
-    monkeypatch.setattr(fileio.sys, "platform", "win32")
+    monkeypatch.setattr(fileio, "_on_windows", lambda: True)
     monkeypatch.setattr(fileio.time, "sleep", lambda seconds: None)
     fileio.write_text(target, "new → text")
     assert target.read_text(encoding="utf-8") == "new → text"

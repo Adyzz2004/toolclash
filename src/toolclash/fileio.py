@@ -66,13 +66,17 @@ def _legacy_encoding() -> str:
     return locale.getpreferredencoding(False)
 
 
+def _on_windows() -> bool:
+    return sys.platform == "win32"
+
+
 _BAD_WINDOWS_NAME_CHARS = set('<>:"|?*')
 
 
 def check_file_name(path: str | Path) -> None:
     """Reject a name Windows cannot store (``a:b`` would silently become a hidden stream)."""
     name = Path(path).name
-    if sys.platform == "win32" and _BAD_WINDOWS_NAME_CHARS & set(name):
+    if _on_windows() and _BAD_WINDOWS_NAME_CHARS & set(name):
         raise ValueError(f'{name} is not a valid file name on Windows (no <>:"|?* allowed)')
 
 
@@ -155,7 +159,7 @@ def _replace(tmp: str, path: Path) -> None:
             os.replace(tmp, path)
             return
         except PermissionError:
-            if sys.platform != "win32":
+            if not _on_windows():
                 raise
             time.sleep(0.05 * (attempt + 1))
     try:
